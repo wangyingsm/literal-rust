@@ -1,3 +1,5 @@
+use core::str::FromStr;
+
 use crate::{
     error::RationalError,
     frac::{Fraction, FractionSign, FractionU16, FractionU32, FractionU8, UnsignedFractionInt},
@@ -114,6 +116,35 @@ where
     }
 }
 
+impl<T> FromStr for Fraction<T>
+where
+    T: Into<u64> + TryFrom<u64> + UnsignedFractionInt + FromStr + From<u8>,
+{
+    type Err = RationalError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (s, sign) = match s.as_bytes()[0] {
+            b'-' => (&s[1..], FractionSign::Negative),
+            b'+' => (&s[1..], FractionSign::NonNegative),
+            _ => (s, FractionSign::NonNegative),
+        };
+        if let Some((n, d)) = s.split_once('/') {
+            let numer = n
+                .parse::<T>()
+                .map_err(|_| RationalError::ParseFractionError)?;
+            let denom = d
+                .parse::<T>()
+                .map_err(|_| RationalError::ParseFractionError)?;
+            Fraction::<T>::new(numer, denom, sign)
+        } else {
+            let numer = s
+                .parse::<T>()
+                .map_err(|_| RationalError::ParseFractionError)?;
+            Fraction::<T>::new(numer, 1_u8.into(), sign)
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
 
@@ -158,6 +189,26 @@ mod test {
         assert_eq!(
             FractionU32::try_from(-128_i64),
             Ok(Fraction::with_negative(128, 1).unwrap())
+        );
+    }
+
+    #[test]
+    fn test_parse_from_str() {
+        assert_eq!(
+            "1/2".parse::<FractionU32>().unwrap(),
+            FractionU32::with_non_negative(1, 2).unwrap()
+        );
+        assert_eq!(
+            "-1/2".parse::<FractionU32>().unwrap(),
+            FractionU32::with_negative(1, 2).unwrap()
+        );
+        assert_eq!(
+            "+1/2".parse::<FractionU32>().unwrap(),
+            FractionU32::with_non_negative(1, 2).unwrap()
+        );
+        assert_eq!(
+            "0".parse::<FractionU32>().unwrap(),
+            FractionU32::with_non_negative(0, 1).unwrap()
         );
     }
 }

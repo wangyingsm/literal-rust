@@ -158,6 +158,35 @@ where
     }
 }
 
+impl<T> Ord for Fraction<T>
+where
+    T: Into<u64> + TryFrom<u64> + UnsignedFractionInt + Eq,
+    u64: From<T>,
+{
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        match (self.sign(), other.sign()) {
+            (FractionSign::NonNegative, FractionSign::NonNegative) => (u64::from(self.numer())
+                * u64::from(other.denom()))
+            .cmp(&(u64::from(other.numer()) * u64::from(self.denom()))),
+            (FractionSign::NonNegative, FractionSign::Negative) => core::cmp::Ordering::Greater,
+            (FractionSign::Negative, FractionSign::NonNegative) => core::cmp::Ordering::Less,
+            (FractionSign::Negative, FractionSign::Negative) => (u64::from(other.numer())
+                * u64::from(self.denom()))
+            .cmp(&(u64::from(self.numer()) * u64::from(other.denom()))),
+        }
+    }
+}
+
+impl<T> PartialOrd for Fraction<T>
+where
+    T: Into<u64> + TryFrom<u64> + UnsignedFractionInt + Eq,
+    u64: From<T>,
+{
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 #[cfg(test)]
 mod test {
 
@@ -170,31 +199,31 @@ mod test {
         assert_eq!(
             FractionU32::with_non_negative(1, 2).unwrap()
                 + Fraction::with_non_negative(1, 2).unwrap(),
-            Fraction::new(1, 1, FractionSign::NonNegative).unwrap()
+            FractionU32::new(1, 1, FractionSign::NonNegative).unwrap()
         );
         assert_eq!(
             FractionU32::with_non_negative(1, 2).unwrap() + Fraction::with_negative(1, 2).unwrap(),
-            Fraction::new(0, 1, FractionSign::NonNegative).unwrap()
+            FractionU32::new(0, 1, FractionSign::NonNegative).unwrap()
         );
         assert_eq!(
             FractionU32::with_non_negative(1, 2).unwrap() + Fraction::with_negative(1, 3).unwrap(),
-            Fraction::new(1, 6, FractionSign::NonNegative).unwrap()
+            FractionU32::new(1, 6, FractionSign::NonNegative).unwrap()
         );
         assert_eq!(
             FractionU32::with_negative(1, 2).unwrap() + Fraction::with_negative(1, 3).unwrap(),
-            Fraction::new(5, 6, FractionSign::Negative).unwrap()
+            FractionU32::new(5, 6, FractionSign::Negative).unwrap()
         );
         assert_eq!(
             FractionU32::with_non_negative(0, 1).unwrap() + Fraction::with_negative(1, 2).unwrap(),
-            Fraction::new(1, 2, FractionSign::Negative).unwrap()
+            FractionU32::new(1, 2, FractionSign::Negative).unwrap()
         );
         assert_eq!(
             FractionU32::with_negative(1, 6).unwrap() + Fraction::with_negative(1, 2).unwrap(),
-            Fraction::new(2, 3, FractionSign::Negative).unwrap()
+            FractionU32::new(2, 3, FractionSign::Negative).unwrap()
         );
         assert_eq!(
             FractionU32::with_non_negative(1, 3).unwrap() + Fraction::with_negative(1, 2).unwrap(),
-            Fraction::new(1, 6, FractionSign::Negative).unwrap()
+            FractionU32::new(1, 6, FractionSign::Negative).unwrap()
         );
         assert_eq!(
             FractionU32::with_non_negative(1, 2).unwrap() + 1.into(),
@@ -207,5 +236,33 @@ mod test {
     fn test_fraction_add_with_overflow() {
         let f = Fraction::with_non_negative(u32::MAX - 1, u32::MAX).unwrap();
         let _ = f + f;
+    }
+
+    #[test]
+    fn test_fraction_ord() {
+        assert!(
+            FractionU32::with_non_negative(1, 2).unwrap()
+                > FractionU32::with_non_negative(1, 3).unwrap()
+        );
+        assert!(
+            FractionU32::with_non_negative(1, 1).unwrap()
+                > FractionU32::with_non_negative(0, 1).unwrap()
+        );
+        assert!(
+            FractionU32::with_non_negative(1, 2).unwrap()
+                > FractionU32::with_negative(2, 3).unwrap()
+        );
+        assert!(
+            FractionU32::with_non_negative(1, 2).unwrap()
+                < FractionU32::with_non_negative(2, 3).unwrap()
+        );
+        assert!(
+            FractionU32::with_non_negative(1, 2).unwrap()
+                == FractionU32::with_non_negative(50, 100).unwrap()
+        );
+        assert!(
+            FractionU32::with_non_negative(0, 2).unwrap()
+                == FractionU32::with_non_negative(0, 3).unwrap()
+        );
     }
 }

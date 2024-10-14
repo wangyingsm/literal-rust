@@ -18,9 +18,9 @@ pub type FractionU32 = Fraction<u32>;
 
 #[derive(Debug)]
 pub struct Fraction<T> {
-    numer: T,
-    denom: T,
-    sign: FractionSign,
+    pub(crate) numer: T,
+    pub(crate) denom: T,
+    pub(crate) sign: FractionSign,
 }
 
 impl<T> Clone for Fraction<T>
@@ -66,7 +66,6 @@ impl Neg for FractionSign {
     }
 }
 
-
 impl<T> PartialEq<Fraction<T>> for Fraction<T>
 where
     T: PartialEq<T>,
@@ -75,6 +74,8 @@ where
         self.numer == other.numer && self.denom == other.denom && self.sign == other.sign
     }
 }
+
+impl<T> Eq for Fraction<T> where T: Eq {}
 
 pub trait UnsignedFractionInt: Copy {}
 

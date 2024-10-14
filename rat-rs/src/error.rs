@@ -6,6 +6,7 @@ pub enum RationalError {
     NumeratorOverflow,
     DenominatorOverflow,
     DivideByZero,
+    ParseFractionError,
 }
 
 impl Error for RationalError {}
@@ -17,6 +18,7 @@ impl Display for RationalError {
             RationalError::NumeratorOverflow => write!(f, "numerator overflow"),
             RationalError::DenominatorOverflow => write!(f, "denominator overflow"),
             RationalError::DivideByZero => write!(f, "divided by zero"),
+            RationalError::ParseFractionError => write!(f, "parse string to fraction error"),
         }
     }
 }
