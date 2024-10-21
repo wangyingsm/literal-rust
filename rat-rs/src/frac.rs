@@ -120,6 +120,8 @@ where
     }
 }
 
+// hot path
+
 pub(crate) fn gcd(mut m: u64, mut n: u64) -> u64 {
     while n != 0 {
         let remainder = m % n;

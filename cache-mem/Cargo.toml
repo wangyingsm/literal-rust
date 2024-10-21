@@ -1,22 +1,14 @@
 [package]
-name = "rat-rs"
+name = "cache-mem"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-num = "0.4.3"
-
-[lib]
-crate-type = ["rlib"]
-
-[features]
-std = []
-default = []
+rand = "0.8.5"
 
 [dev-dependencies]
 criterion = "0.5.1"
-rand = "0.8.5"
 
 [[bench]]
-name = "bench_gcd"
+name = "bench_counters"
 harness = false
