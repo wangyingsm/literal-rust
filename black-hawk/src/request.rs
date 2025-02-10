@@ -1,16 +1,20 @@
-use std::{collections::HashMap, fmt::Display, io::Read, net::TcpStream};
+use std::{collections::HashMap, fmt::Display};
 
-use nom::bytes::complete::{tag, take_until};
+use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::error::RequestError;
+use crate::{
+    consts::{ContentType, TransferEncoding},
+    parse::{parse_http_header, parse_request_body},
+};
 
 #[derive(Debug)]
-pub struct HttpRequest<B> {
+#[allow(unused)]
+pub struct HttpRequest {
     pub(crate) header: HttpRequestHeader,
-    pub(crate) body: Option<B>,
+    pub(crate) body: RequestBody,
 }
 
-impl<B> HttpRequest<B> {
+impl HttpRequest {
     pub fn header(&self) -> &HttpRequestHeader {
         &self.header
     }
@@ -26,6 +30,7 @@ impl From<HashMap<String, String>> for HttpHeaders {
 }
 
 #[derive(Debug)]
+#[allow(unused)]
 pub struct HttpRequestHeader {
     pub(crate) method: HttpMethod,
     pub(crate) path: String,
@@ -37,20 +42,43 @@ impl HttpRequestHeader {
     pub fn version(&self) -> HttpVersion {
         self.version
     }
+
+    pub fn content_type(&self) -> Option<ContentType> {
+        self.headers.0.get("Content-Type")?.parse().ok()
+    }
+
+    pub fn transfer_encoding(&self) -> Option<TransferEncoding> {
+        self.headers.0.get("Transfer-Encoding")?.parse().ok()
+    }
+
+    pub fn content_length(&self) -> Option<usize> {
+        self.headers.0.get("Content-Length")?.parse().ok()
+    }
+
+    pub fn accept(&self) -> Option<&str> {
+        self.headers.0.get("Accept").map(|ac| ac.as_str())
+    }
 }
 
-#[derive(Debug)]
-#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttpMethod {
     Get,
+    Post,
+    Put,
+    Options,
+    Delete,
+    Patch,
+    Connect,
+    Head,
+    Trace,
 }
 
-#[derive(Debug, Clone, Copy)]
-#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttpVersion {
     V1_0,
     V1_1,
     V2,
+    V3,
 }
 
 impl Display for HttpVersion {
@@ -59,72 +87,94 @@ impl Display for HttpVersion {
             HttpVersion::V1_0 => write!(f, "HTTP/1.0"),
             HttpVersion::V1_1 => write!(f, "HTTP/1.1"),
             HttpVersion::V2 => write!(f, "HTTP/2"),
+            HttpVersion::V3 => write!(f, "HTTP/3"),
         }
     }
 }
 
-pub fn read_http_request(stream: &mut TcpStream) -> anyhow::Result<HttpRequest<Vec<u8>>> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RequestBody {
+    Nil,
+    RawText(String),
+    Chunked(Vec<String>),
+    MultiPart(()),
+    Json(serde_json::Value),
+}
+
+pub async fn read_http_request<R: AsyncRead + Unpin>(mut stream: R) -> anyhow::Result<HttpRequest> {
     let mut buf = [0; 4096];
     let mut header_buf = vec![];
+    let mut body_buf = vec![];
     loop {
-        let n = stream.read(&mut buf)?;
-        if let Some(n) = buf[..n].windows(4).position(|w| w == super::DELIMITER) {
-            header_buf.extend_from_slice(&buf[..n]);
+        let n = stream.read(&mut buf).await?;
+        if let Some(h_len) = buf[..n].windows(4).position(|w| w == super::DELIMITER) {
+            header_buf.extend_from_slice(&buf[..h_len]);
+            body_buf.extend_from_slice(&buf[h_len..n]);
             break;
         }
         header_buf.extend_from_slice(&buf[..n]);
     }
-    println!("{}", String::from_utf8_lossy(&header_buf));
-    let header = parse_header(&header_buf)?;
-    Ok(HttpRequest { header, body: None })
-}
+    // println!("{}", String::from_utf8_lossy(&header_buf));
+    let header = parse_http_header(&header_buf)?;
 
-fn parse_header(i: &[u8]) -> anyhow::Result<HttpRequestHeader> {
-    let (i, method) = parse_request_method(i).map_err(|_| RequestError::ParseHeaderError)?;
-    let (i, path) = take_until::<_, _, nom::error::Error<&[u8]>>(" ")(i)
-        .map_err(|_| RequestError::ParseHeaderError)?;
-    let (i, _) = tag::<_, _, nom::error::Error<&[u8]>>(b" ")(i)
-        .map_err(|_| RequestError::ParseHeaderError)?;
-    let path = String::from_utf8_lossy(path).to_string();
-    let (i, _) = tag::<_, _, nom::error::Error<&[u8]>>(b"HTTP/")(i)
-        .map_err(|_| RequestError::ParseHeaderError)?;
-    let (i, version_bytes) = take_until_new_line(i)?;
-    let version = match version_bytes {
-        b"1.0" => HttpVersion::V1_0,
-        b"1.1" => HttpVersion::V1_1,
-        b"2" => HttpVersion::V2,
-        _ => unimplemented!("version not support yet"),
+    let body = loop {
+        let n = stream.read(&mut buf).await?;
+        if n == 0 {
+            break body_buf;
+        }
+        if let Some(n) = buf[..n].windows(4).position(|w| w == super::DELIMITER) {
+            body_buf.extend_from_slice(&buf[..n]);
+            break body_buf;
+        }
+        body_buf.extend_from_slice(&buf[..n]);
     };
-    let i = consume_newline(i)?;
-    let mut headers = HashMap::new();
-    let header_lines = String::from_utf8_lossy(i);
-    for l in header_lines.lines() {
-        let mut splits = l.split(": ");
-        let name = splits.next().ok_or(RequestError::ParseHeaderError)?;
-        let value = splits.next().ok_or(RequestError::ParseHeaderError)?;
-        headers.insert(name.to_string(), value.to_string());
+
+    let body = if body.is_empty() {
+        RequestBody::Nil
+    } else {
+        parse_request_body(&body, &header)?
+    };
+    Ok(HttpRequest { header, body })
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_http_request_read_firefox_get_with_json() {
+        let raw = "GET /favicon.ico HTTP/1.1\r\nHost: 0.0.0.0=5000\r\nUser-Agent: Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9) Gecko/2008061015 Firefox/3.0\r\nAccept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\nAccept-Language: en-us,en;q=0.5\r\nAccept-Encoding: gzip,deflate\r\nAccept-Charset: ISO-8859-1,utf-8;q=0.7,*;q=0.7\r\nKeep-Alive: 300\r\nConnection: keep-alive\r\n\r\n{\"name\":\"hello\",\"age\":42}\r\n\r\n";
+        let request = read_http_request(raw.as_bytes()).await.unwrap();
+        let body: serde_json::Value =
+            serde_json::from_str("{\"name\":\"hello\",\"age\":42}").unwrap();
+        assert_eq!(request.body, RequestBody::Json(body));
     }
-    Ok(HttpRequestHeader {
-        method,
-        path,
-        version,
-        headers: headers.into(),
-    })
-}
 
-fn take_until_new_line(i: &[u8]) -> anyhow::Result<(&[u8], &[u8])> {
-    Ok(take_until::<_, _, nom::error::Error<&[u8]>>("\r\n")(i)
-        .map_err(|_| RequestError::ParseHeaderError)?)
-}
+    #[tokio::test]
+    async fn test_http_request_read_post_with_raw_text() {
+        let raw = "POST /post_identity_body_world?q=search#hey HTTP/1.1\r\nAccept: */*\r\nContent-Length: 5\r\n\r\nWorld\r\n\r\n";
+        let request = read_http_request(raw.as_bytes()).await.unwrap();
+        assert_eq!(request.header.method, HttpMethod::Post);
+        assert_eq!(
+            request.header.path,
+            "/post_identity_body_world?q=search#hey"
+        );
+        assert_eq!(request.header.content_length(), Some(5));
+        assert_eq!(request.header.accept(), Some("*/*"));
+        assert_eq!(request.body, RequestBody::RawText("World".to_string()));
+    }
 
-fn consume_newline(i: &[u8]) -> anyhow::Result<&[u8]> {
-    let (i, _) = tag::<_, _, nom::error::Error<&[u8]>>(b"\r\n")(i)
-        .map_err(|_| RequestError::SkipNewlineError)?;
-    Ok(i)
-}
-
-fn parse_request_method(i: &[u8]) -> anyhow::Result<(&[u8], HttpMethod)> {
-    let (i, _) = tag::<_, _, nom::error::Error<&[u8]>>("GET ")(i)
-        .map_err(|_| RequestError::ParseHeaderError)?;
-    Ok((i, HttpMethod::Get))
+    #[tokio::test]
+    async fn test_http_request_read_post_with_chunked() {
+        let raw = "POST /post_chunked_all_your_base HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n1e\r\nall your base are belong to us\r\n0\r\n\r\n";
+        let request = read_http_request(raw.as_bytes()).await.unwrap();
+        assert_eq!(
+            request.body,
+            RequestBody::Chunked(vec![
+                "1e".to_string(),
+                "all your base are belong to us".to_string(),
+                "0".to_string()
+            ])
+        );
+    }
 }
