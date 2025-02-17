@@ -19,7 +19,7 @@ pub async fn handle_request(mut stream: TcpStream) {
         }
     };
     // println!("{request:?}");
-    let ok = match request.header.path.as_str() {
+    let ok = match request.header.path.abs_path() {
         "/" => match handle_root_path(&request).await {
             Ok(r) => r,
             Err(e) => {

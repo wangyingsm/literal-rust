@@ -1,11 +1,16 @@
 use std::{collections::HashMap, fmt::Display};
 
+use boundary::Boundary;
+use path::HttpPath;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::{
     consts::{ContentType, TransferEncoding},
     parse::{parse_http_header, parse_request_body},
 };
+
+pub mod boundary;
+pub mod path;
 
 #[derive(Debug)]
 #[allow(unused)]
@@ -33,7 +38,7 @@ impl From<HashMap<String, String>> for HttpHeaders {
 #[allow(unused)]
 pub struct HttpRequestHeader {
     pub(crate) method: HttpMethod,
-    pub(crate) path: String,
+    pub(crate) path: HttpPath,
     pub(crate) version: HttpVersion,
     pub(crate) headers: HttpHeaders,
 }
@@ -96,8 +101,8 @@ impl Display for HttpVersion {
 pub enum RequestBody {
     Nil,
     RawText(String),
-    Chunked(Vec<String>),
-    MultiPart(()),
+    Chunked { content: String, sizes: Vec<usize> },
+    MultiPart(Vec<Boundary>),
     Json(serde_json::Value),
 }
 
@@ -109,7 +114,7 @@ pub async fn read_http_request<R: AsyncRead + Unpin>(mut stream: R) -> anyhow::R
         let n = stream.read(&mut buf).await?;
         if let Some(h_len) = buf[..n].windows(4).position(|w| w == super::DELIMITER) {
             header_buf.extend_from_slice(&buf[..h_len]);
-            body_buf.extend_from_slice(&buf[h_len..n]);
+            body_buf.extend_from_slice(&buf[h_len + 4..n]);
             break;
         }
         header_buf.extend_from_slice(&buf[..n]);
@@ -129,22 +134,30 @@ pub async fn read_http_request<R: AsyncRead + Unpin>(mut stream: R) -> anyhow::R
         body_buf.extend_from_slice(&buf[..n]);
     };
 
+    let body = if body.ends_with(super::DELIMITER) {
+        &body[..body.len() - 4]
+    } else {
+        &body
+    };
+
     let body = if body.is_empty() {
         RequestBody::Nil
     } else {
-        parse_request_body(&body, &header)?
+        parse_request_body(body, &header)?
     };
     Ok(HttpRequest { header, body })
 }
 
 #[cfg(test)]
 mod test {
+    use crate::request::path::Query;
+
     use super::*;
 
     #[tokio::test]
     async fn test_http_request_read_firefox_get_with_json() {
-        let raw = "GET /favicon.ico HTTP/1.1\r\nHost: 0.0.0.0=5000\r\nUser-Agent: Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9) Gecko/2008061015 Firefox/3.0\r\nAccept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\nAccept-Language: en-us,en;q=0.5\r\nAccept-Encoding: gzip,deflate\r\nAccept-Charset: ISO-8859-1,utf-8;q=0.7,*;q=0.7\r\nKeep-Alive: 300\r\nConnection: keep-alive\r\n\r\n{\"name\":\"hello\",\"age\":42}\r\n\r\n";
-        let request = read_http_request(raw.as_bytes()).await.unwrap();
+        let raw = "GET /favicon.ico HTTP/1.1\r\nHost: 0.0.0.0=5000\r\nContent-Type: application/json\r\nUser-Agent: Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9) Gecko/2008061015 Firefox/3.0\r\nAccept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\nAccept-Language: en-us,en;q=0.5\r\nAccept-Encoding: gzip,deflate\r\nAccept-Charset: ISO-8859-1,utf-8;q=0.7,*;q=0.7\r\nKeep-Alive: 300\r\nConnection: keep-alive\r\n\r\n{\"name\":\"hello\",\"age\":42}\r\n\r\n";
+        let request = dbg!(read_http_request(raw.as_bytes()).await.unwrap());
         let body: serde_json::Value =
             serde_json::from_str("{\"name\":\"hello\",\"age\":42}").unwrap();
         assert_eq!(request.body, RequestBody::Json(body));
@@ -153,12 +166,17 @@ mod test {
     #[tokio::test]
     async fn test_http_request_read_post_with_raw_text() {
         let raw = "POST /post_identity_body_world?q=search#hey HTTP/1.1\r\nAccept: */*\r\nContent-Length: 5\r\n\r\nWorld\r\n\r\n";
-        let request = read_http_request(raw.as_bytes()).await.unwrap();
+        let request = dbg!(read_http_request(raw.as_bytes()).await.unwrap());
         assert_eq!(request.header.method, HttpMethod::Post);
+        assert_eq!(request.header.path.abs_path(), "/post_identity_body_world");
         assert_eq!(
-            request.header.path,
-            "/post_identity_body_world?q=search#hey"
+            request.header.path.query(),
+            vec![Query::Single {
+                name: "q".to_string(),
+                value: "search".to_string()
+            }]
         );
+        assert_eq!(request.header.path.anchor(), Some("hey"));
         assert_eq!(request.header.content_length(), Some(5));
         assert_eq!(request.header.accept(), Some("*/*"));
         assert_eq!(request.body, RequestBody::RawText("World".to_string()));
@@ -170,11 +188,23 @@ mod test {
         let request = read_http_request(raw.as_bytes()).await.unwrap();
         assert_eq!(
             request.body,
-            RequestBody::Chunked(vec![
-                "1e".to_string(),
-                "all your base are belong to us".to_string(),
-                "0".to_string()
-            ])
+            RequestBody::Chunked {
+                content: "all your base are belong to us".to_string(),
+                sizes: vec![0x1e],
+            }
         );
+    }
+
+    #[tokio::test]
+    async fn test_http_request_read_post_with_chunked_triple_zero_ending() {
+        let raw = "POST /two_chunks_mult_zero_end HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n6\r\n world\r\n000\r\n\r\n";
+        let request = read_http_request(raw.as_bytes()).await.unwrap();
+        assert_eq!(
+            request.body,
+            RequestBody::Chunked {
+                content: "hello world".to_string(),
+                sizes: vec![5, 6]
+            }
+        )
     }
 }

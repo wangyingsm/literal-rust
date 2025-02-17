@@ -2,12 +2,13 @@ use std::str::FromStr;
 
 use crate::error::RequestParseError;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum ContentType {
     PlainText,
     TextHtml,
     ApplicationJson,
+    MultiPart(String),
 }
 
 impl FromStr for ContentType {
@@ -18,6 +19,13 @@ impl FromStr for ContentType {
             "plain/text" => Ok(Self::PlainText),
             "text/html" => Ok(Self::TextHtml),
             "application/json" => Ok(Self::ApplicationJson),
+            s if s.starts_with("multipart/form-data") => {
+                let pos = s
+                    .chars()
+                    .position(|x| x == '=')
+                    .ok_or(RequestParseError::MultiPartWithoutBoundary)?;
+                Ok(Self::MultiPart(s[pos + 1..].to_string()))
+            }
             _ => Err(RequestParseError::UnknownContentType),
         }
     }

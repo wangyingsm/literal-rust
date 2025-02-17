@@ -10,7 +10,11 @@ use nom::{
 use crate::{
     consts::{ContentType, TransferEncoding},
     error::RequestParseError,
-    request::{HttpHeaders, HttpMethod, HttpRequestHeader, HttpVersion, RequestBody},
+    request::{
+        boundary::{self, Boundary},
+        path::HttpPath,
+        HttpHeaders, HttpMethod, HttpRequestHeader, HttpVersion, RequestBody,
+    },
 };
 
 pub(crate) fn parse_method(i: &[u8]) -> IResult<&[u8], HttpMethod> {
@@ -44,9 +48,9 @@ pub(crate) fn parse_white_space(i: &[u8]) -> IResult<&[u8], ()> {
     Ok((tag(" ")(i)?.0, ()))
 }
 
-pub(crate) fn parse_path(i: &[u8]) -> IResult<&[u8], String> {
-    let (i, path_str) = take_until(" ")(i)?;
-    Ok((i, String::from_utf8_lossy(path_str).to_string()))
+pub(crate) fn parse_path(i: &[u8]) -> Result<(&[u8], HttpPath), RequestParseError> {
+    let (i, path_str) = take_until::<_, _, nom::error::Error<&[u8]>>(" ")(i)?;
+    Ok((i, HttpPath::from_request(path_str)?))
 }
 
 pub(crate) fn parse_version(i: &[u8]) -> IResult<&[u8], HttpVersion> {
@@ -88,15 +92,14 @@ pub(crate) fn parse_http_header(i: &[u8]) -> Result<HttpRequestHeader, RequestPa
     let (i, version) = parse_version(i)?;
     let (i, _) = parse_new_line(i)?;
     let mut headers = HttpHeaders(HashMap::new());
-    let mut j = i;
-    while let Ok((i, line)) = take_until::<_, _, nom::error::Error<&[u8]>>("\r\n")(j) {
-        if line.trim_ascii().is_empty() {
-            break;
+    let header_lines = String::from_utf8_lossy(i);
+    for line in header_lines.lines() {
+        dbg!(line);
+        if line.trim().is_empty() {
+            continue;
         }
-        let (_, (name, value)) = parse_header_pair(line)?;
-        let (i, _) = parse_new_line(i)?;
+        let (_, (name, value)) = parse_header_pair(line.trim().as_bytes())?;
         headers.0.insert(name, value);
-        j = i;
     }
     Ok(HttpRequestHeader {
         method,
@@ -107,34 +110,57 @@ pub(crate) fn parse_http_header(i: &[u8]) -> Result<HttpRequestHeader, RequestPa
 }
 
 pub(crate) fn parse_chunked_body(i: &[u8]) -> Result<RequestBody, RequestParseError> {
-    let mut j = i;
-    let mut body = vec![];
-    while let Ok((i, chunk)) = take_until::<_, _, nom::error::Error<&[u8]>>("\r\n")(j) {
-        body.push(String::from_utf8_lossy(chunk).to_string());
-        j = i;
+    let chunked_lines = String::from_utf8_lossy(i);
+    let mut all_contents = String::new();
+    let mut chunk_sizes = vec![];
+    let mut c_lines = chunked_lines.lines();
+    while let Some(line) = c_lines.next() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let chunk_size = usize::from_str_radix(line.trim(), 16)?;
+        if chunk_size == 0 {
+            break;
+        }
+        let line = c_lines.next().ok_or(RequestParseError::ParseChunkContent)?;
+        if line.len() != chunk_size {
+            return Err(RequestParseError::ChunkContentLengthUnmatch(
+                chunk_size,
+                line.len(),
+            ));
+        }
+        chunk_sizes.push(chunk_size);
+        all_contents.push_str(line);
     }
-    Ok(RequestBody::Chunked(body))
+    Ok(RequestBody::Chunked {
+        content: all_contents,
+        sizes: chunk_sizes,
+    })
+}
+
+pub(crate) fn parse_multipart_boundary(body: &[u8], boundary: &str) -> Vec<Boundary> {
+    todo!()
 }
 
 pub(crate) fn parse_request_body(
     body: &[u8],
     header: &HttpRequestHeader,
 ) -> anyhow::Result<RequestBody> {
+    if let Some(TransferEncoding::Chunked) = header.transfer_encoding() {
+        return Ok(parse_chunked_body(body)?);
+    }
     match header.content_type() {
         Some(ContentType::ApplicationJson) => {
             let j = serde_json::from_slice::<serde_json::Value>(body)?;
-            return Ok(RequestBody::Json(j));
+            Ok(RequestBody::Json(j))
         }
-        None => {
-            return Ok(RequestBody::RawText(
-                String::from_utf8_lossy(body).to_string(),
-            ))
-        }
-        _ => (),
-    }
-    match header.transfer_encoding() {
-        Some(TransferEncoding::Chunked) => Ok(parse_chunked_body(body)?),
-        _ => Err(RequestParseError::UnknownTransferEncoding.into()),
+        Some(ContentType::MultiPart(boundary)) => Ok(RequestBody::MultiPart(
+            parse_multipart_boundary(body, &boundary),
+        )),
+        None => Ok(RequestBody::RawText(
+            String::from_utf8_lossy(body).to_string(),
+        )),
+        _ => Err(RequestParseError::UnknownContentType.into()),
     }
 }
 
@@ -150,7 +176,7 @@ mod test {
         assert_eq!(method, HttpMethod::Get);
         let (i, _) = parse_white_space(i).unwrap();
         let (i, path) = parse_path(i).unwrap();
-        assert_eq!(path, "/test");
+        assert_eq!(path.abs_path(), "/test");
         let (i, _) = parse_white_space(i).unwrap();
         let (i, version) = parse_version(i).unwrap();
         assert_eq!(version, HttpVersion::V1_1);
@@ -158,7 +184,7 @@ mod test {
         let http_header = parse_http_header(raw.as_bytes()).unwrap();
         assert_eq!(http_header.method, HttpMethod::Get);
         assert_eq!(http_header.version, HttpVersion::V1_1);
-        assert_eq!(http_header.path, "/test");
+        assert_eq!(http_header.path.abs_path(), "/test");
         assert_eq!(
             http_header.headers.0.get("Accept"),
             Some(&"*/*".to_string())
@@ -175,7 +201,7 @@ mod test {
         let raw = "GET /favicon.ico HTTP/1.1\r\nHost: 0.0.0.0=5000\r\nUser-Agent: Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9) Gecko/2008061015 Firefox/3.0\r\nAccept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\nAccept-Language: en-us,en;q=0.5\r\nAccept-Encoding: gzip,deflate\r\nAccept-Charset: ISO-8859-1,utf-8;q=0.7,*;q=0.7\r\nKeep-Alive: 300\r\nConnection: keep-alive\r\n\r\n";
         let http_header = parse_http_header(raw.as_bytes()).unwrap();
         assert_eq!(http_header.method, HttpMethod::Get);
-        assert_eq!(http_header.path, "/favicon.ico");
+        assert_eq!(http_header.path.abs_path(), "/favicon.ico");
         assert_eq!(http_header.version, HttpVersion::V1_1);
         assert_eq!(http_header.headers.0.get("Host").unwrap(), "0.0.0.0=5000");
         assert_eq!(
