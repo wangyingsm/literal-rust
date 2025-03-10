@@ -11,8 +11,8 @@ use crate::{
     consts::{ContentType, TransferEncoding},
     error::RequestParseError,
     request::{
-        boundary::{self, Boundary},
-        path::HttpPath,
+        boundary::Boundary,
+        path::{HttpPath, Query},
         HttpHeaders, HttpMethod, HttpRequestHeader, HttpVersion, RequestBody,
     },
 };
@@ -94,7 +94,6 @@ pub(crate) fn parse_http_header(i: &[u8]) -> Result<HttpRequestHeader, RequestPa
     let mut headers = HttpHeaders(HashMap::new());
     let header_lines = String::from_utf8_lossy(i);
     for line in header_lines.lines() {
-        dbg!(line);
         if line.trim().is_empty() {
             continue;
         }
@@ -138,8 +137,114 @@ pub(crate) fn parse_chunked_body(i: &[u8]) -> Result<RequestBody, RequestParseEr
     })
 }
 
-pub(crate) fn parse_multipart_boundary(body: &[u8], boundary: &str) -> Vec<Boundary> {
-    todo!()
+pub(crate) fn parse_multipart_boundary(
+    body: &[u8],
+    bound: &str,
+) -> Result<Vec<Boundary>, RequestParseError> {
+    let mut result = vec![];
+    let mut boundary = String::new();
+    boundary.push_str("--");
+    boundary.push_str(bound);
+    let mut i = body;
+    while tag::<_, _, nom::error::Error<&[u8]>>(boundary.as_bytes())(i).is_ok() {
+        (i, _) = tag(boundary.as_bytes())(i)?;
+        if let Ok((_, _)) = tag::<_, _, nom::error::Error<&[u8]>>("--")(i) {
+            break;
+        }
+        (i, _) = parse_new_line(i)?;
+        let mut line;
+        (i, line) = take_until("\r\n")(i)?;
+        let mut multipart_name = None;
+        let mut multipart_filename = None;
+        let mut ct = None;
+        while !line.is_empty() {
+            let (k, name) = alt((tag("Content-Disposition"), tag("Content-Type")))(line)?;
+            match name {
+                b"Content-Disposition" => {
+                    let (k, _) = tag(": ")(k)?;
+                    let (k, _) = tag("form-data; ")(k)?;
+                    let (k, n0) = alt((tag("name"), tag("filename")))(k)?;
+                    let (k, _) = tag("=\"")(k)?;
+                    (multipart_name, multipart_filename) = if let Ok((k, v0)) =
+                        take_until::<_, _, nom::error::Error<&[u8]>>("\"; ")(k)
+                    {
+                        let (k, _) = tag("\"; ")(k)?;
+                        let (k, _) = alt((tag("name"), tag("filename")))(k)?;
+                        let (k, _) = tag("=\"")(k)?;
+                        let (_, v1) = take_until("\"")(k)?;
+                        if n0 == b"name" {
+                            (
+                                Some(String::from_utf8_lossy(v0).to_string()),
+                                Some(String::from_utf8_lossy(v1).to_string()),
+                            )
+                        } else {
+                            (
+                                Some(String::from_utf8_lossy(v1).to_string()),
+                                Some(String::from_utf8_lossy(v0).to_string()),
+                            )
+                        }
+                    } else {
+                        let (_, v0) = take_until("\"")(k)?;
+                        if n0 == b"filename" {
+                            (None, Some(String::from_utf8_lossy(v0).to_string()))
+                        } else {
+                            (Some(String::from_utf8_lossy(v0).to_string()), None)
+                        }
+                    };
+                }
+                b"Content-Type" => {
+                    let (k, _) = tag(": ")(k)?;
+                    ct = Some(String::from_utf8_lossy(k).to_string());
+                }
+                _ => return Err(RequestParseError::MultipartHeaderParse),
+            }
+            (i, _) = parse_new_line(i)?;
+            (i, line) = take_until("\r\n")(i)?;
+        }
+        (i, _) = parse_new_line(i)?;
+        match ct {
+            Some(ct) => match ct.as_str() {
+                "text/plain" | "text/json" | "application/json" => {
+                    let content;
+                    (i, content) = take_until("\r\n")(i)?;
+                    let content = String::from_utf8_lossy(content).to_string();
+                    if let Some(filename) = multipart_filename {
+                        result.push(Boundary::RawText {
+                            name: multipart_name,
+                            filename,
+                            content,
+                        });
+                    } else {
+                        return Err(RequestParseError::MultipartHeaderParse);
+                    }
+                }
+                "image/jpeg" | "video|mp4" | "image/png" => {
+                    let content;
+                    (i, content) = take_until("\r\n")(i)?;
+                    if let Some(filename) = multipart_filename {
+                        result.push(Boundary::RawBinary {
+                            name: multipart_name,
+                            filename,
+                            content: content.to_vec(),
+                        });
+                    }
+                }
+                ct => return Err(RequestParseError::UnsupportMimeType(ct.to_string())),
+            },
+            None => {
+                let v;
+                (i, v) = take_until("\r\n")(i)?;
+                let v = String::from_utf8_lossy(v).to_string();
+                if let Some(n) = multipart_name {
+                    result.push(Boundary::FormData(Query::Single { name: n, value: v }));
+                } else {
+                    return Err(RequestParseError::MultipartHeaderParse);
+                }
+            }
+        }
+        (i, _) = parse_new_line(i)?;
+    }
+    Ok(result)
 }
 
 pub(crate) fn parse_request_body(
@@ -155,7 +260,7 @@ pub(crate) fn parse_request_body(
             Ok(RequestBody::Json(j))
         }
         Some(ContentType::MultiPart(boundary)) => Ok(RequestBody::MultiPart(
-            parse_multipart_boundary(body, &boundary),
+            parse_multipart_boundary(body, &boundary)?,
         )),
         None => Ok(RequestBody::RawText(
             String::from_utf8_lossy(body).to_string(),

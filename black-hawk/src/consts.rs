@@ -1,8 +1,10 @@
 use std::str::FromStr;
 
+use nom::bytes::complete::tag;
+
 use crate::error::RequestParseError;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ContentType {
     PlainText,
@@ -20,11 +22,8 @@ impl FromStr for ContentType {
             "text/html" => Ok(Self::TextHtml),
             "application/json" => Ok(Self::ApplicationJson),
             s if s.starts_with("multipart/form-data") => {
-                let pos = s
-                    .chars()
-                    .position(|x| x == '=')
-                    .ok_or(RequestParseError::MultiPartWithoutBoundary)?;
-                Ok(Self::MultiPart(s[pos + 1..].to_string()))
+                let (i, _) = tag("multipart/form-data; boundary=")(s.as_bytes())?;
+                Ok(Self::MultiPart(String::from_utf8_lossy(i).to_string()))
             }
             _ => Err(RequestParseError::UnknownContentType),
         }

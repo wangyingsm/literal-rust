@@ -157,7 +157,7 @@ mod test {
     #[tokio::test]
     async fn test_http_request_read_firefox_get_with_json() {
         let raw = "GET /favicon.ico HTTP/1.1\r\nHost: 0.0.0.0=5000\r\nContent-Type: application/json\r\nUser-Agent: Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9) Gecko/2008061015 Firefox/3.0\r\nAccept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\nAccept-Language: en-us,en;q=0.5\r\nAccept-Encoding: gzip,deflate\r\nAccept-Charset: ISO-8859-1,utf-8;q=0.7,*;q=0.7\r\nKeep-Alive: 300\r\nConnection: keep-alive\r\n\r\n{\"name\":\"hello\",\"age\":42}\r\n\r\n";
-        let request = dbg!(read_http_request(raw.as_bytes()).await.unwrap());
+        let request = read_http_request(raw.as_bytes()).await.unwrap();
         let body: serde_json::Value =
             serde_json::from_str("{\"name\":\"hello\",\"age\":42}").unwrap();
         assert_eq!(request.body, RequestBody::Json(body));
@@ -166,7 +166,7 @@ mod test {
     #[tokio::test]
     async fn test_http_request_read_post_with_raw_text() {
         let raw = "POST /post_identity_body_world?q=search#hey HTTP/1.1\r\nAccept: */*\r\nContent-Length: 5\r\n\r\nWorld\r\n\r\n";
-        let request = dbg!(read_http_request(raw.as_bytes()).await.unwrap());
+        let request = read_http_request(raw.as_bytes()).await.unwrap();
         assert_eq!(request.header.method, HttpMethod::Post);
         assert_eq!(request.header.path.abs_path(), "/post_identity_body_world");
         assert_eq!(
@@ -205,6 +205,30 @@ mod test {
                 content: "hello world".to_string(),
                 sizes: vec![5, 6]
             }
+        )
+    }
+
+    #[tokio::test]
+    async fn test_http_request_read_post_with_multipart_formdata() {
+        let raw = "POST /upload HTTP/1.1\r\nHost: example.com\r\nContent-Type: multipart/form-data; boundary=--WebKitFormBoundaryABC123\r\nContent-Length: 345\r\n\r\n----WebKitFormBoundaryABC123\r\nContent-Disposition: form-data; name=\"username\"\r\n\r\nJohnDoe\r\n----WebKitFormBoundaryABC123\r\nContent-Disposition: form-data; name=\"file\"; filename=\"example.txt\"\r\nContent-Type: text/plain\r\n\r\nThis is the content of the file.\r\n----WebKitFormBoundaryABC123--\r\n\r\n";
+        let request = read_http_request(raw.as_bytes()).await.unwrap();
+        assert_eq!(
+            request.header.content_type().unwrap(),
+            ContentType::MultiPart("--WebKitFormBoundaryABC123".to_string())
+        );
+        assert_eq!(
+            request.body,
+            RequestBody::MultiPart(vec![
+                Boundary::FormData(Query::Single {
+                    name: "username".to_string(),
+                    value: "JohnDoe".to_string()
+                }),
+                Boundary::RawText {
+                    name: Some("file".to_string()),
+                    filename: "example.txt".to_string(),
+                    content: "This is the content of the file.".to_string()
+                }
+            ])
         )
     }
 }

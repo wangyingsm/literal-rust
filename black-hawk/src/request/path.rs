@@ -52,7 +52,8 @@ impl HttpPath {
                 for nv_pair in name_values {
                     let mut nv = nv_pair.split('=');
                     if let Some(name) = nv.next() {
-                        let value = nv.next().unwrap_or("");
+                        let name = urlencoding::decode(name)?;
+                        let value = urlencoding::decode(nv.next().unwrap_or(""))?;
                         query.entry(name).or_insert(vec![]).push(value.to_string());
                     } else {
                         return Err(RequestParseError::EmptyRequestPath);

@@ -1,4 +1,4 @@
-use std::num::ParseIntError;
+use std::{num::ParseIntError, string::FromUtf8Error};
 
 use thiserror::Error;
 
@@ -20,6 +20,12 @@ pub enum RequestParseError {
     ChunkContentLengthUnmatch(usize, usize),
     #[error("multipart without boundary set")]
     MultiPartWithoutBoundary,
+    #[error("url decode error")]
+    UrlDecode,
+    #[error("multipart header parse error")]
+    MultipartHeaderParse,
+    #[error("unsupport MIME type {0}")]
+    UnsupportMimeType(String),
 }
 
 impl From<nom::Err<nom::error::Error<&[u8]>>> for RequestParseError {
@@ -31,5 +37,11 @@ impl From<nom::Err<nom::error::Error<&[u8]>>> for RequestParseError {
 impl From<ParseIntError> for RequestParseError {
     fn from(value: ParseIntError) -> Self {
         Self::ParseChunkSize(value)
+    }
+}
+
+impl From<FromUtf8Error> for RequestParseError {
+    fn from(_value: FromUtf8Error) -> Self {
+        Self::UrlDecode
     }
 }
