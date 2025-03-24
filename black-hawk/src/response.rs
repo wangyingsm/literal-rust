@@ -1,42 +1,58 @@
+// refactor response module
+
+pub(crate) mod body;
+pub mod error;
+mod status;
+
 use std::collections::HashMap;
 
-use crate::request::{HttpHeaders, HttpVersion};
+use body::Body;
+use error::ResponseError;
+use status::HttpStatus;
 
 #[derive(Debug)]
-#[allow(unused)]
-pub struct Response<B> {
-    version: HttpVersion,
-    status_code: u16,
-    status: String,
-    header: HttpHeaders,
-    body: Option<B>,
+pub struct Response {
+    status: HttpStatus,
+    headers: HashMap<String, String>,
+    body: Body,
 }
 
-pub fn ok_response(version: HttpVersion) -> Response<Vec<u8>> {
-    let mut header_map = HashMap::new();
-    header_map.insert("Content-Length".to_string(), "0".to_string());
-    Response {
-        version,
-        status_code: 200,
-        status: "OK".to_string(),
-        header: HttpHeaders(HashMap::new()),
-        body: None,
+impl Response {
+    pub fn new(status: u16, content_type: &str, body: Body) -> Result<Self, ResponseError> {
+        let status = HttpStatus::try_from(status)?;
+        let mut headers = HashMap::new();
+        headers.insert("Content-Type".to_string(), content_type.to_string());
+        Ok(Response {
+            status,
+            headers,
+            body,
+        })
     }
-}
 
-impl<B> Response<B> {
-    pub fn serialize(&self) -> Vec<u8>
-    where
-        B: serde::Serialize,
-    {
-        let mut result = vec![];
-        result.extend(
-            format!("{} {} {}\r\n", self.version, self.status_code, self.status).as_bytes(),
-        );
-        for (k, v) in self.header.0.iter() {
-            result.extend(format!("{}: {}\r\n", k, v).as_bytes());
+    pub fn add_header(&mut self, name: impl AsRef<str>, value: impl AsRef<str>) {
+        self.headers
+            .insert(name.as_ref().to_string(), value.as_ref().to_string());
+    }
+
+    pub fn status(&self) -> &HttpStatus {
+        &self.status
+    }
+
+    pub fn body(&self) -> &Body {
+        &self.body
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buffer = Vec::new();
+        buffer.extend(self.status.to_string().as_bytes());
+        for (name, value) in &self.headers {
+            buffer.extend(format!("{name}: {value}").as_bytes());
         }
-        result.extend(b"\r\n");
-        result
+        match &self.body {
+            Body::RawText(s) => buffer.extend(s.as_bytes()),
+            Body::RawBinary(v) => buffer.extend(v),
+            Body::Json(j) => buffer.extend(j),
+        }
+        buffer
     }
 }

@@ -26,6 +26,8 @@ pub enum RequestParseError {
     MultipartHeaderParse,
     #[error("unsupport MIME type {0}")]
     UnsupportMimeType(String),
+    #[error("missing necessary content length")]
+    MissingContentLength,
 }
 
 impl From<nom::Err<nom::error::Error<&[u8]>>> for RequestParseError {

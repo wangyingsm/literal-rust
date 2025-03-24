@@ -121,17 +121,30 @@ pub async fn read_http_request<R: AsyncRead + Unpin>(mut stream: R) -> anyhow::R
     }
     // println!("{}", String::from_utf8_lossy(&header_buf));
     let header = parse_http_header(&header_buf)?;
-
-    let body = loop {
-        let n = stream.read(&mut buf).await?;
-        if n == 0 {
-            break body_buf;
-        }
-        if let Some(n) = buf[..n].windows(4).position(|w| w == super::DELIMITER) {
+    let body = if let Some(ContentType::MultiPart(bound)) = header.content_type() {
+        let mut boundary = String::new();
+        boundary.push_str(bound.as_str());
+        boundary.push_str("--\r\n\r\n");
+        while !body_buf.ends_with(boundary.as_bytes()) {
+            let n = stream.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
             body_buf.extend_from_slice(&buf[..n]);
-            break body_buf;
         }
-        body_buf.extend_from_slice(&buf[..n]);
+        body_buf
+    } else {
+        loop {
+            let n = stream.read(&mut buf).await?;
+            if n == 0 {
+                break body_buf;
+            }
+            if let Some(n) = buf[..n].windows(4).position(|w| w == super::DELIMITER) {
+                body_buf.extend_from_slice(&buf[..n]);
+                break body_buf;
+            }
+            body_buf.extend_from_slice(&buf[..n]);
+        }
     };
 
     let body = if body.ends_with(super::DELIMITER) {
