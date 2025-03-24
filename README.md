@@ -15,3 +15,4 @@ Codes assembled from a series of videos talking about rust. With some interestin
 | 用Rust构建一个HTTP服务器             | Part 3 | [bilibili-1](https://www.bilibili.com/video/BV1GHNae2EYC/)<br/>[bilibili-2](https://www.bilibili.com/video/BV1GHNae2Ehh/) | [bc5ee24](https://github.com/wangyingsm/literal-rust/commit/bc5ee24) |
 | 用Rust构建一个HTTP服务器             | Part 4 | [bilibili-1](https://www.bilibili.com/video/BV1HswZefET5/)<br/>[bilibili-2](https://www.bilibili.com/video/BV1z8wZexEVJ/) | [4fcadea](https://github.com/wangyingsm/literal-rust/commit/4fcadea) |
 | 用Rust构建一个HTTP服务器             | Part 5 | [bilibili](https://www.bilibili.com/video/BV1xpRjYeEo1/) | [0bbafdd](https://github.com/wangyingsm/literal-rust/commit/0bbafdd) |
+| 用Rust构建一个HTTP服务器             | Part 7 | [bilibili](https://www.bilibili.com/video/BV1Woo1YDENm/) | [7161d9e](https://github.com/wangyingsm/literal-rust/commit/7161d9e) |
