@@ -12,6 +12,8 @@ pub enum RequestParseError {
     UnknownTransferEncoding,
     #[error("empty request path")]
     EmptyRequestPath,
+    #[error("incomplete chunked body")]
+    IncompleteChunkedBody,
     #[error("parse chunk size error: {0}")]
     ParseChunkSize(ParseIntError),
     #[error("parse chunk content error")]
@@ -20,6 +22,8 @@ pub enum RequestParseError {
     ChunkContentLengthUnmatch(usize, usize),
     #[error("multipart without boundary set")]
     MultiPartWithoutBoundary,
+    #[error("incomplete multipart body")]
+    IncompleteMultipartBody,
     #[error("url decode error")]
     UrlDecode,
     #[error("multipart header parse error")]

@@ -9,6 +9,16 @@ pub enum Body {
     Json(Vec<u8>),
 }
 
+impl Body {
+    pub fn len(&self) -> usize {
+        match self {
+            Body::RawText(s) => s.len(),
+            Body::RawBinary(b) => b.len(),
+            Body::Json(j) => j.len(),
+        }
+    }
+}
+
 pub trait IntoTextBody
 where
     Self: Sized,

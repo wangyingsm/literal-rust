@@ -9,6 +9,7 @@ pub enum HttpStatus {
     Created = 201,
     BadRequest = 400,
     NotFound = 404,
+    InternalServerError = 500,
 }
 
 impl Display for HttpStatus {
@@ -18,6 +19,7 @@ impl Display for HttpStatus {
             HttpStatus::Created => write!(f, "201 Created"),
             HttpStatus::BadRequest => write!(f, "400 Bad Request"),
             HttpStatus::NotFound => write!(f, "404 Not Found"),
+            HttpStatus::InternalServerError => write!(f, "500 Internal Server Error"),
         }
     }
 }
@@ -31,6 +33,7 @@ impl TryFrom<u16> for HttpStatus {
             201 => Ok(HttpStatus::Created),
             400 => Ok(HttpStatus::BadRequest),
             404 => Ok(HttpStatus::NotFound),
+            500 => Ok(HttpStatus::InternalServerError),
             _ => Err(ResponseError::InvalidStatusCode(value)),
         }
     }

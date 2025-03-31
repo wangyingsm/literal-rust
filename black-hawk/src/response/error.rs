@@ -8,6 +8,8 @@ pub enum ResponseError {
     Io(std::io::Error),
     #[error("JSON serialization error: {0}")]
     JsonSerialize(serde_json::Error),
+    #[error("Unknown image extension: {0}")]
+    UnknownImageExtension(String),
 }
 
 impl From<std::io::Error> for ResponseError {

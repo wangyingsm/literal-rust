@@ -1,11 +1,15 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, time::Duration};
 
 use boundary::Boundary;
 use path::HttpPath;
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::{
+    io::{AsyncRead, AsyncReadExt},
+    time::timeout,
+};
 
 use crate::{
     consts::{ContentType, TransferEncoding},
+    error::RequestParseError,
     parse::{parse_http_header, parse_request_body},
 };
 
@@ -121,42 +125,44 @@ pub async fn read_http_request<R: AsyncRead + Unpin>(mut stream: R) -> anyhow::R
     }
     // println!("{}", String::from_utf8_lossy(&header_buf));
     let header = parse_http_header(&header_buf)?;
+    let content_length = header.content_length().unwrap_or(0);
+    let mut remaining = content_length.saturating_sub(body_buf.len());
     let body = if let Some(ContentType::MultiPart(bound)) = header.content_type() {
         let mut boundary = String::new();
         boundary.push_str(bound.as_str());
         boundary.push_str("--\r\n\r\n");
         while !body_buf.ends_with(boundary.as_bytes()) {
-            let n = stream.read(&mut buf).await?;
+            let n = timeout(Duration::from_secs(5), stream.read(&mut buf)).await??;
             if n == 0 {
-                break;
+                return Err(RequestParseError::IncompleteMultipartBody.into());
             }
             body_buf.extend_from_slice(&buf[..n]);
         }
         body_buf
-    } else {
+    } else if let Some(TransferEncoding::Chunked) = header.transfer_encoding() {
         loop {
-            let n = stream.read(&mut buf).await?;
-            if n == 0 {
+            if body_buf.ends_with(b"0\r\n\r\n") {
                 break body_buf;
             }
-            if let Some(n) = buf[..n].windows(4).position(|w| w == super::DELIMITER) {
-                body_buf.extend_from_slice(&buf[..n]);
-                break body_buf;
+            let n = timeout(Duration::from_secs(5), stream.read(&mut buf)).await??;
+            if n == 0 {
+                return Err(RequestParseError::IncompleteChunkedBody.into());
             }
             body_buf.extend_from_slice(&buf[..n]);
         }
-    };
-
-    let body = if body.ends_with(super::DELIMITER) {
-        &body[..body.len() - 4]
     } else {
-        &body
+        while remaining > 0 {
+            let n = timeout(Duration::from_secs(5), stream.read(&mut buf)).await??;
+            body_buf.extend_from_slice(&buf[..n]);
+            remaining -= n;
+        }
+        body_buf
     };
 
     let body = if body.is_empty() {
         RequestBody::Nil
     } else {
-        parse_request_body(body, &header)?
+        parse_request_body(&body, &header)?
     };
     Ok(HttpRequest { header, body })
 }
@@ -169,7 +175,7 @@ mod test {
 
     #[tokio::test]
     async fn test_http_request_read_firefox_get_with_json() {
-        let raw = "GET /favicon.ico HTTP/1.1\r\nHost: 0.0.0.0=5000\r\nContent-Type: application/json\r\nUser-Agent: Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9) Gecko/2008061015 Firefox/3.0\r\nAccept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\nAccept-Language: en-us,en;q=0.5\r\nAccept-Encoding: gzip,deflate\r\nAccept-Charset: ISO-8859-1,utf-8;q=0.7,*;q=0.7\r\nKeep-Alive: 300\r\nConnection: keep-alive\r\n\r\n{\"name\":\"hello\",\"age\":42}\r\n\r\n";
+        let raw = "GET /favicon.ico HTTP/1.1\r\nHost: 0.0.0.0=5000\r\nContent-Type: application/json\r\nUser-Agent: Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9) Gecko/2008061015 Firefox/3.0\r\nAccept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\nAccept-Language: en-us,en;q=0.5\r\nAccept-Encoding: gzip,deflate\r\nAccept-Charset: ISO-8859-1,utf-8;q=0.7,*;q=0.7\r\nKeep-Alive: 300\r\nConnection: keep-alive\r\nContent-Length: 25\r\n\r\n{\"name\":\"hello\",\"age\":42}";
         let request = read_http_request(raw.as_bytes()).await.unwrap();
         let body: serde_json::Value =
             serde_json::from_str("{\"name\":\"hello\",\"age\":42}").unwrap();
@@ -178,7 +184,7 @@ mod test {
 
     #[tokio::test]
     async fn test_http_request_read_post_with_raw_text() {
-        let raw = "POST /post_identity_body_world?q=search#hey HTTP/1.1\r\nAccept: */*\r\nContent-Length: 5\r\n\r\nWorld\r\n\r\n";
+        let raw = "POST /post_identity_body_world?q=search#hey HTTP/1.1\r\nAccept: */*\r\nContent-Length: 5\r\n\r\nWorld";
         let request = read_http_request(raw.as_bytes()).await.unwrap();
         assert_eq!(request.header.method, HttpMethod::Post);
         assert_eq!(request.header.path.abs_path(), "/post_identity_body_world");

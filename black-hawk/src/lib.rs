@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use handler::StaticHtmlHandler;
+use handler::{StaticHtmlHandler, StaticImageHandler};
+use request::HttpMethod;
 use response::Response;
 use route::{Router, StaticRouter};
 use tokio::{io::AsyncWriteExt, net::TcpStream};
@@ -14,6 +15,7 @@ pub mod response;
 pub mod route;
 
 const DELIMITER: &[u8] = b"\r\n\r\n";
+pub const WEB_ROOT: &str = "html";
 
 pub struct AppContext {
     static_router: StaticRouter,
@@ -22,7 +24,26 @@ pub struct AppContext {
 impl AppContext {
     pub fn new() -> Self {
         let mut static_router = StaticRouter::new();
-        static_router.add_route("/index.html".to_string(), Box::new(StaticHtmlHandler));
+        static_router.add_route(
+            &HttpMethod::Get,
+            "/static/index.html".to_string(),
+            Box::new(StaticHtmlHandler),
+        );
+        static_router.add_route(
+            &HttpMethod::Get,
+            "/static/images/logo.png".to_string(),
+            Box::new(StaticImageHandler),
+        );
+        // static_router.add_route(
+        //     &HttpMethod::Get,
+        //     "/static/images/*".to_string(),
+        //     Box::new(StaticImageHandler),
+        // );
+        // static_router.add_route(
+        //     &HttpMethod::Get,
+        //     "/api/user/{user_id}".to_string(),
+        //     Box::new(StaticHtmlHandler),
+        // );
         Self { static_router }
     }
 }
@@ -43,8 +64,8 @@ pub async fn handle_request(mut stream: TcpStream, context: Arc<AppContext>) {
     };
 
     let abs_path = request.header().path.abs_path();
-    let ok = match &abs_path.as_bytes()[..8] {
-        b"/static/" => match context.static_router.route(&request.header.path) {
+    let response = match &abs_path.as_bytes()[..8] {
+        b"/static/" => match context.static_router.route(&request) {
             Some(handler) => match handler.handle(&request).await {
                 Ok(r) => r,
                 Err(e) => Response::new(
@@ -68,8 +89,9 @@ pub async fn handle_request(mut stream: TcpStream, context: Arc<AppContext>) {
         )
         .unwrap(),
     };
+    println!("{response:?}");
 
-    if let Err(e) = stream.write_all(&ok.serialize()).await {
+    if let Err(e) = stream.write_all(&response.serialize()).await {
         eprintln!("{e}");
     }
 }
