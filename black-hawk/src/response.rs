@@ -2,15 +2,14 @@
 
 pub(crate) mod body;
 pub mod error;
-mod status;
+pub(crate) mod status;
 
 use std::collections::HashMap;
 
 use body::Body;
-use error::ResponseError;
 use status::HttpStatus;
 
-use crate::request::HttpVersion;
+use crate::{consts::ContentType, request::HttpVersion};
 
 #[derive(Debug)]
 pub struct Response {
@@ -20,16 +19,18 @@ pub struct Response {
 }
 
 impl Response {
-    pub fn new(status: u16, content_type: &str, body: Body) -> Result<Self, ResponseError> {
-        let status = HttpStatus::try_from(status)?;
+    pub fn new(status: HttpStatus, content_type: &ContentType, body: Body) -> Self {
         let mut headers = HashMap::new();
         headers.insert("Content-Length".to_string(), body.len().to_string());
-        headers.insert("Content-Type".to_string(), content_type.to_string());
-        Ok(Response {
+        headers.insert(
+            "Content-Type".to_string(),
+            content_type.as_str().to_string(),
+        );
+        Response {
             status,
             headers,
             body,
-        })
+        }
     }
 
     pub fn add_header(&mut self, name: impl AsRef<str>, value: impl AsRef<str>) {

@@ -19,6 +19,7 @@ impl Body {
     }
 }
 
+#[allow(dead_code)]
 pub trait IntoTextBody
 where
     Self: Sized,

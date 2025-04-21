@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
-use handler::{StaticHtmlHandler, StaticImageHandler};
+use consts::ContentType;
+use handler::StaticHandler;
 use request::HttpMethod;
-use response::Response;
+use response::{status::HttpStatus, Response};
 use route::{Router, StaticRouter};
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 
@@ -16,34 +17,20 @@ pub mod route;
 
 const DELIMITER: &[u8] = b"\r\n\r\n";
 pub const WEB_ROOT: &str = "html";
+pub const INDEX_FILE: &str = "index.html";
 
 pub struct AppContext {
     static_router: StaticRouter,
 }
 
+// 'static并不代表生命周期是完全静态的，代表修饰的value能够在程序运行的整个生命周期中存在
 impl AppContext {
     pub fn new() -> Self {
         let mut static_router = StaticRouter::new();
-        static_router.add_route(
-            &HttpMethod::Get,
-            "/static/index.html".to_string(),
-            Box::new(StaticHtmlHandler),
-        );
-        static_router.add_route(
-            &HttpMethod::Get,
-            "/static/images/logo.png".to_string(),
-            Box::new(StaticImageHandler),
-        );
-        // static_router.add_route(
-        //     &HttpMethod::Get,
-        //     "/static/images/*".to_string(),
-        //     Box::new(StaticImageHandler),
-        // );
-        // static_router.add_route(
-        //     &HttpMethod::Get,
-        //     "/api/user/{user_id}".to_string(),
-        //     Box::new(StaticHtmlHandler),
-        // );
+        // /static/images/logo.png should be handled by StaticHandler with path /images/logo.png
+        static_router.add_route(&HttpMethod::Get, "/*", Box::new(StaticHandler));
+        // /api/user/{user_id} should match any /user/12345 like path and
+        // put `12345` into path variable `user_id`
         Self { static_router }
     }
 }
@@ -55,7 +42,7 @@ impl Default for AppContext {
 }
 
 pub async fn handle_request(mut stream: TcpStream, context: Arc<AppContext>) {
-    let request = match request::read_http_request(&mut stream).await {
+    let mut request = match request::read_http_request(&mut stream).await {
         Ok(req) => req,
         Err(e) => {
             eprintln!("{e}");
@@ -64,30 +51,30 @@ pub async fn handle_request(mut stream: TcpStream, context: Arc<AppContext>) {
     };
 
     let abs_path = request.header().path.abs_path();
-    let response = match &abs_path.as_bytes()[..8] {
-        b"/static/" => match context.static_router.route(&request) {
+    println!("abs_path: {abs_path}");
+    let response = if abs_path.starts_with("/static/") {
+        *request.header_mut().path.abs_path_mut() = abs_path[7..].to_string();
+        match context.static_router.route(&mut request) {
             Some(handler) => match handler.handle(&request).await {
                 Ok(r) => r,
                 Err(e) => Response::new(
-                    500,
-                    "text/plain",
+                    HttpStatus::InternalServerError,
+                    &ContentType::PlainText,
                     response::body::Body::RawText(format!("Internal Server Error: {e}")),
-                )
-                .unwrap(),
+                ),
             },
             None => Response::new(
-                404,
-                "text/plain",
+                HttpStatus::NotFound,
+                &ContentType::PlainText,
                 response::body::Body::RawText("Not Found".to_string()),
-            )
-            .unwrap(),
-        },
-        _ => Response::new(
-            404,
-            "text/plain",
+            ),
+        }
+    } else {
+        Response::new(
+            HttpStatus::NotFound,
+            &ContentType::PlainText,
             response::body::Body::RawText("Not Found".to_string()),
         )
-        .unwrap(),
     };
     println!("{response:?}");
 

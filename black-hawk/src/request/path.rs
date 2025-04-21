@@ -88,6 +88,10 @@ impl HttpPath {
         &self.abs_path
     }
 
+    pub fn abs_path_mut(&mut self) -> &mut String {
+        &mut self.abs_path
+    }
+
     pub fn query(&self) -> &[Query] {
         &self.query
     }

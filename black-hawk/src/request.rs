@@ -21,11 +21,16 @@ pub mod path;
 pub struct HttpRequest {
     pub(crate) header: HttpRequestHeader,
     pub(crate) body: RequestBody,
+    pub(crate) path_vars: HashMap<String, String>,
 }
 
 impl HttpRequest {
     pub fn header(&self) -> &HttpRequestHeader {
         &self.header
+    }
+
+    pub fn header_mut(&mut self) -> &mut HttpRequestHeader {
+        &mut self.header
     }
 }
 
@@ -164,7 +169,11 @@ pub async fn read_http_request<R: AsyncRead + Unpin>(mut stream: R) -> anyhow::R
     } else {
         parse_request_body(&body, &header)?
     };
-    Ok(HttpRequest { header, body })
+    Ok(HttpRequest {
+        header,
+        body,
+        path_vars: HashMap::new(),
+    })
 }
 
 #[cfg(test)]
