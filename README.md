@@ -17,3 +17,5 @@ Codes assembled from a series of videos talking about rust. With some interestin
 | 用Rust构建一个HTTP服务器             | Part 5 | [bilibili](https://www.bilibili.com/video/BV1xpRjYeEo1/) | [0bbafdd](https://github.com/wangyingsm/literal-rust/commit/0bbafdd) |
 | 用Rust构建一个HTTP服务器             | Part 7 | [bilibili](https://www.bilibili.com/video/BV1Woo1YDENm/) | [7161d9e](https://github.com/wangyingsm/literal-rust/commit/7161d9e) |
 | 用Rust构建一个HTTP服务器             | Part 8 | [bilibili](https://www.bilibili.com/video/BV1irZWYLEkS/) | [abe2691](https://github.com/wangyingsm/literal-rust/commit/abe2691) |
+| 用Rust构建一个HTTP服务器             | Part 9 | [bilibili](https://www.bilibili.com/video/BV1PZdjYeEuT/) | - |
+| 用Rust构建一个HTTP服务器             | Part 10 | [bilibili](https://www.bilibili.com/video/BV1Vp51zKEKC/) | [851bf64](https://github.com/wangyingsm/literal-rust/commit/851bf64) |
