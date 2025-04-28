@@ -19,3 +19,4 @@ Codes assembled from a series of videos talking about rust. With some interestin
 | 用Rust构建一个HTTP服务器             | Part 8 | [bilibili](https://www.bilibili.com/video/BV1irZWYLEkS/) | [abe2691](https://github.com/wangyingsm/literal-rust/commit/abe2691) |
 | 用Rust构建一个HTTP服务器             | Part 9 | [bilibili](https://www.bilibili.com/video/BV1PZdjYeEuT/) | - |
 | 用Rust构建一个HTTP服务器             | Part 10 | [bilibili](https://www.bilibili.com/video/BV1Vp51zKEKC/) | [851bf64](https://github.com/wangyingsm/literal-rust/commit/851bf64) |
+| 用Rust构建一个分布式哈希表 | Part 1 | [bilibili](https://www.bilibili.com/video/BV1eeLUzEE4Y/) | [7339109](https://github.com/wangyingsm/literal-rust/commit/7339109) |
