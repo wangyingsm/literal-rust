@@ -1,9 +1,10 @@
 pub mod core;
+pub mod rpc;
 
 #[cfg(test)]
-const ID_BYTES_LENGTH: usize = 4;
+pub const ID_BYTES_LENGTH: usize = 4;
 #[cfg(not(test))]
-const ID_BYTES_LENGTH: usize = 20;
+pub const ID_BYTES_LENGTH: usize = 20;
 
-const K_REPLICATIONS: usize = 20;
-const ALPHA_PARALLEL: usize = 3;
+pub const K_REPLICATIONS: usize = 20;
+pub const ALPHA_PARALLEL: usize = 3;

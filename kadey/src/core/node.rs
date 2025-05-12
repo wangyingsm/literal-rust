@@ -1,4 +1,4 @@
-use std::{net::IpAddr, time::SystemTime};
+use std::{array, net::IpAddr, time::SystemTime};
 
 use sha1::{Digest, Sha1};
 
@@ -55,12 +55,28 @@ impl Node {
     pub fn node_id(&self) -> NodeId {
         self.node_id
     }
+
+    pub fn update_last_seen(&mut self) {
+        self.last_seen = SystemTime::now();
+    }
+
+    pub fn ip_addr(&self) -> IpAddr {
+        self.ip_addr
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
 }
 
 pub(crate) fn get_node_id_bit(node_id: &NodeId, i: usize) -> bool {
     let byte_index = i / 8;
     let bit_index = i % 8;
     node_id[byte_index] & (1 << (8 - bit_index - 1)) != 0
+}
+
+pub(crate) fn node_id_distance(lhs: &NodeId, rhs: &NodeId) -> NodeId {
+    array::from_fn(|i| lhs[i] ^ rhs[i])
 }
 
 #[cfg(test)]

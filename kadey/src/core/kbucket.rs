@@ -6,13 +6,14 @@ use crate::K_REPLICATIONS;
 
 use super::node::{Node, NodeId, get_node_id_bit};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum KBucketAddResult {
     Added,
     Replaced(KBucket, KBucket),
+    Updated,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct KBucket {
     prefix_bits: BitVec,
     queue: VecDeque<Node>,
@@ -27,11 +28,22 @@ impl KBucket {
         self.queue.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn is_full(&self) -> bool {
         self.len() >= K_REPLICATIONS
     }
 
     pub fn add_node(&mut self, node_id: NodeId, ip_addr: IpAddr, port: u16) -> KBucketAddResult {
+        let pos = self.queue.iter().position(|n| n.node_id() == node_id);
+        if let Some(p) = pos {
+            self.queue[p].update_last_seen();
+            let node = self.queue.drain(p..p + 1).next().unwrap();
+            self.queue.push_back(node);
+            return KBucketAddResult::Updated;
+        }
         let node = Node::new(node_id, ip_addr, port);
         if self.is_full() {
             if self.prefix_bits.len() < K_REPLICATIONS * 8 {
@@ -88,6 +100,8 @@ impl KBucket {
 
 #[cfg(test)]
 pub(crate) mod test {
+    use std::str::FromStr;
+
     use super::*;
 
     pub(crate) fn random_ip_addr_and_port() -> (IpAddr, u16) {
@@ -120,5 +134,24 @@ pub(crate) mod test {
                 assert!(zero_branch.queue.contains(&node));
             }
         }
+    }
+
+    #[test]
+    fn test_add_existed_node_to_k_bucket() {
+        let mut bucket = KBucket::new();
+        let node_id = [0, 1, 2, 3];
+        let ip_addr = IpAddr::from_str("127.0.0.1").unwrap();
+        let port = 65535;
+        let result = bucket.add_node(node_id, ip_addr, port);
+        assert_eq!(result, KBucketAddResult::Added);
+        let ip_addr = IpAddr::from_str("192.168.1.1").unwrap();
+        let port = 1025;
+        let result = bucket.add_node(node_id, ip_addr, port);
+        assert_eq!(result, KBucketAddResult::Updated);
+        assert_eq!(bucket.len(), 1);
+        let node_id = [4, 3, 2, 1];
+        let result = bucket.add_node(node_id, ip_addr, port);
+        assert_eq!(result, KBucketAddResult::Added);
+        assert_eq!(bucket.len(), 2);
     }
 }
