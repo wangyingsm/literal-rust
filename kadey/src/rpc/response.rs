@@ -1,12 +1,12 @@
-use bincode::Decode;
+use bincode::{Decode, Encode};
 
 use crate::core::route::NodeTuple;
 
 use super::request::KeyId;
 
-type RpcId = KeyId;
+pub type RpcId = KeyId;
 
-#[derive(Debug, Decode)]
+#[derive(Debug, Decode, Encode)]
 pub enum Response {
     Pong {
         rpc_id: RpcId,
@@ -18,17 +18,11 @@ pub enum Response {
         rpc_id: RpcId,
         bucket: Vec<NodeTuple>,
     },
-    Value,
+    Value(ValueResponse),
 }
 
-#[derive(Debug, Decode)]
+#[derive(Debug, Decode, Encode)]
 pub enum ValueResponse {
-    Nodes {
-        rpc_id: RpcId,
-        bucket: Vec<NodeTuple>,
-    },
-    Value {
-        rpc_id: RpcId,
-        value: Vec<u8>,
-    },
+    Value { rpc_id: RpcId, value: Vec<u8> },
+    NotFound { rpc_id: RpcId },
 }

@@ -1,6 +1,6 @@
 use std::net::IpAddr;
 
-use bincode::Encode;
+use bincode::{Decode, Encode};
 use tokio::net::UdpSocket;
 
 use crate::core::node::NodeId;
@@ -9,12 +9,22 @@ use super::response::Response;
 
 pub type KeyId = NodeId;
 
-#[derive(Debug, Encode)]
+#[derive(Debug, Encode, Decode)]
 pub enum Request {
-    Ping,
-    Store { key: Vec<u8>, value: Vec<u8> },
-    FindNode(NodeId),
-    FindValue(KeyId),
+    Ping(NodeId),
+    Store {
+        src_node_id: NodeId,
+        key: Vec<u8>,
+        value: Vec<u8>,
+    },
+    FindNode {
+        src_node_id: NodeId,
+        node_id: NodeId,
+    },
+    FindValue {
+        src_node_id: NodeId,
+        key_id: KeyId,
+    },
 }
 
 impl Request {
